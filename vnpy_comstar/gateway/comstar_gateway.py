@@ -41,7 +41,7 @@ VN_ENUMS = {
 CHINA_TZ = pytz.timezone("Asia/Shanghai")
 
 
-class ComstarGateway(BaseGateway):
+class ComstarXbondGateway(BaseGateway):
     """ComStar的XBond交易接口"""
 
     default_setting = {
@@ -51,11 +51,11 @@ class ComstarGateway(BaseGateway):
         "Key": ""
     }
 
-    exchanges = [Exchange.CFETS]
+    exchanges = [Exchange.XBOND]
 
     def __init__(self, event_engine: EventEngine):
         """Constructor"""
-        super().__init__(event_engine, "COMSTAR")
+        super().__init__(event_engine, "COMSTAR-XBOND")
         self.api = UserApi(self)
 
     def connect(self, setting: dict) -> None:
@@ -100,7 +100,7 @@ class ComstarGateway(BaseGateway):
         data["strategy_name"] = data.pop("reference")
 
         order_id = self.api.send_order(data, self.gateway_name)
-        
+
         # 返回vt_orderid
         return f"{self.gateway_name}.{order_id}"
 
@@ -129,6 +129,35 @@ class ComstarGateway(BaseGateway):
     def close(self) -> None:
         """关闭"""
         self.api.close()
+
+    def on_contract(self, contract: ContractData) -> None:
+        """合约推送"""
+        contract.exchange = Exchange.XBOND
+        contract.gateway_name = self.gateway_name
+        super().on_contract(contract)
+
+    def on_tick(self, tick: TickData) -> None:
+        """行情推送"""
+        tick.exchange = Exchange.XBOND
+        tick.gateway_name = self.gateway_name
+        super().on_tick(tick)
+
+    def on_order(self, order: OrderData) -> None:
+        """委托推送"""
+        order.exchange = Exchange.XBOND
+        order.gateway_name = self.gateway_name
+        super().on_order(order)
+
+    def on_trade(self, trade: TradeData) -> None:
+        """成交推送"""
+        trade.exchange = Exchange.XBOND
+        trade.gateway_name = self.gateway_name
+        super().on_trade(trade)
+
+    def on_log(self, log: LogData) -> None:
+        """日志推送"""
+        log.gateway_name = self.gateway_name
+        super().on_log(log)
 
 
 class ComstarQuoteGateway(BaseGateway):
@@ -292,9 +321,7 @@ class UserApi(TdApi):
 
     def on_tick(self, data: dict):
         """行情推送"""
-        if data["gateway_name"] == "COMSTAR":
-            tick: TickData = parse_tick(data)
-        elif data["gateway_name"] == "COMSTAR-QUOTE":
+        if data["gateway_name"] == "COMSTAR-QUOTE":
             # 将交易中心格式转换为本地格式
             converted_data = convert_quote_tick(data)
 
@@ -303,6 +330,8 @@ class UserApi(TdApi):
 
             # 更新报价周边信息
             self.gateway.update_quote_info(tick.vt_symbol, converted_data)
+        else:
+            tick: TickData = parse_tick(data)
 
         self.gateway.on_tick(tick)
 
@@ -352,10 +381,10 @@ class UserApi(TdApi):
     def on_login(self, data: dict):
         """登陆回报"""
         if data["status"]:
-            if self.gateway_name == "COMSTAR":
-                self.gateway.query_all()
-            elif self.gateway_name == "COMSTAR-QUOTE":
+            if self.gateway_name == "COMSTAR-QUOTE":
                 self.gateway.maker_query_all()
+            else:
+                self.gateway.query_all()
             self.gateway.write_log("服务器登录成功")
         else:
             self.gateway.write_log("服务器登录失败")
