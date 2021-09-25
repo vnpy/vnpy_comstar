@@ -134,29 +134,34 @@ class ComstarXbondGateway(BaseGateway):
         """合约推送"""
         contract.exchange = Exchange.XBOND
         contract.gateway_name = self.gateway_name
+        contract.__post_init__()
         super().on_contract(contract)
 
     def on_tick(self, tick: TickData) -> None:
         """行情推送"""
         tick.exchange = Exchange.XBOND
         tick.gateway_name = self.gateway_name
+        tick.__post_init__()
         super().on_tick(tick)
 
     def on_order(self, order: OrderData) -> None:
         """委托推送"""
         order.exchange = Exchange.XBOND
         order.gateway_name = self.gateway_name
+        order.__post_init__()
         super().on_order(order)
 
     def on_trade(self, trade: TradeData) -> None:
         """成交推送"""
         trade.exchange = Exchange.XBOND
         trade.gateway_name = self.gateway_name
+        trade.__post_init__()
         super().on_trade(trade)
 
     def on_log(self, log: LogData) -> None:
         """日志推送"""
         log.gateway_name = self.gateway_name
+        log.__post_init__()
         super().on_log(log)
 
 
@@ -500,7 +505,7 @@ def parse_quote(data: dict) -> QuoteData:
         ask_volume=data["sellSideVO"]["leaveQty"],
         bid_offset=Offset.NONE,
         ask_offset=Offset.NONE,
-        status=data["status"],
+        status=enum_decode(data["status"]),
         datetime=generate_datetime(data["transactTime"]),
         gateway_name=data["gateway_name"]
     )
