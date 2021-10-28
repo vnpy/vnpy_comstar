@@ -40,6 +40,8 @@ VN_ENUMS = {
 
 CHINA_TZ = pytz.timezone("Asia/Shanghai")
 
+SIZE = 10_000_000
+
 
 class ComstarXbondGateway(BaseGateway):
     """ComStar的XBond交易接口"""
@@ -93,6 +95,9 @@ class ComstarXbondGateway(BaseGateway):
         if settle_type not in {"T0", "T1"}:
             self.write_log("请输入清算速度T0或T1")
             return ""
+
+        # 乘以合约乘数
+        req.volume = req.volume * SIZE
 
         data = vn_encode(req)
         data["symbol"] = symbol
@@ -220,6 +225,9 @@ class ComstarQuoteGateway(BaseGateway):
             self.write_log("请输入清算速度T0或T1")
             return ""
 
+        # 乘以合约乘数
+        req.volume = req.volume * SIZE
+
         quote_info: QuoteInfo = self.quote_infos.get(req.vt_symbol, None)
         if not quote_info:
             self.write_log(f"找不到{req.vt_symbol}的双边报价信息")
@@ -254,6 +262,10 @@ class ComstarQuoteGateway(BaseGateway):
         if settle_type not in {"T0", "T1"}:
             self.write_log("请输入清算速度T0或T1")
             return ""
+
+        # 乘以合约乘数
+        req.bid_volume = req.bid_volume * SIZE
+        req.ask_volume = req.ask_volume * SIZE
 
         data = vn_encode(req)
         data["symbol"] = symbol
@@ -338,6 +350,21 @@ class UserApi(TdApi):
         else:
             tick: TickData = parse_tick(data)
 
+        # 调整成交量量和挂单量
+        tick.volume = tick.volume / SIZE
+        tick.bid_volume_1 = tick.bid_volume_1 / SIZE
+        tick.bid_volume_2 = tick.bid_volume_2 / SIZE
+        tick.bid_volume_3 = tick.bid_volume_3 / SIZE
+        tick.bid_volume_4 = tick.bid_volume_4 / SIZE
+        tick.bid_volume_5 = tick.bid_volume_5 / SIZE
+        tick.ask_volume_1 = tick.ask_volume_1 / SIZE
+        tick.ask_volume_2 = tick.ask_volume_2 / SIZE
+        tick.ask_volume_3 = tick.ask_volume_3 / SIZE
+        tick.ask_volume_4 = tick.ask_volume_4 / SIZE
+        tick.ask_volume_5 = tick.ask_volume_5 / SIZE
+        tick.public_bid_volume = tick.public_bid_volume / SIZE
+        tick.public_ask_volume = tick.public_ask_volume / SIZE
+
         self.gateway.on_tick(tick)
 
     def on_quote(self, data: dict):
@@ -348,6 +375,10 @@ class UserApi(TdApi):
     def on_order(self, data: dict):
         """委托状态更新"""
         order: OrderData = parse_order(data)
+
+        # 调整委托的数量和成交量
+        order.volume = order.volume / SIZE
+        order.traded = order.traded / SIZE
 
         # 过滤断线重连后的重复推送
         last_order = self.orders.get(order.vt_orderid, None)
@@ -365,6 +396,9 @@ class UserApi(TdApi):
     def on_trade(self, data: dict):
         """成交推送"""
         trade: TradeData = parse_trade(data)
+
+        # 调整委托的成交量
+        trade.volume = trade.volume / SIZE
 
         # 过滤非当前API的推送
         if trade.gateway_name != self.gateway_name:
@@ -412,6 +446,7 @@ class UserApi(TdApi):
         for d in data:
             for settle_type in ("T0", "T1"):
                 contract: ContractData = parse_contract(d, settle_type)
+                contract.size = contract.size * SIZE
                 contract.gateway_name = self.gateway_name
                 self.gateway.on_contract(contract)
 
