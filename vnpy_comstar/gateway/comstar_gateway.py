@@ -58,6 +58,9 @@ class ComstarXbondGateway(BaseGateway):
     def __init__(self, event_engine: EventEngine):
         """Constructor"""
         super().__init__(event_engine, "COMSTAR-XBOND")
+
+        self.exchange: Exchange = Exchange.XBOND
+
         self.api = UserApi(self)
 
     def connect(self, setting: dict) -> None:
@@ -187,6 +190,8 @@ class ComstarQuoteGateway(BaseGateway):
     def __init__(self, event_engine: EventEngine):
         """Constructor"""
         super().__init__(event_engine, "COMSTAR-QUOTE")
+
+        self.exchange: Exchange = Exchange.CFETS
 
         self.api = UserApi(self)
 
@@ -330,8 +335,9 @@ class UserApi(TdApi):
         """Constructor"""
         super().__init__()
 
-        self.gateway = gateway
-        self.gateway_name = gateway.gateway_name
+        self.gateway: BaseGateway = gateway
+        self.gateway_name: str = gateway.gateway_name
+        self.exchange: Exchange = gateway.exchange
 
         self.trades: Dict[str, TradeData] = {}
         self.orders: Dict[str, OrderData] = {}
@@ -362,14 +368,28 @@ class UserApi(TdApi):
         tick.ask_volume_3 = tick.ask_volume_3 / SIZE
         tick.ask_volume_4 = tick.ask_volume_4 / SIZE
         tick.ask_volume_5 = tick.ask_volume_5 / SIZE
-        tick.public_bid_volume = tick.public_bid_volume / SIZE
-        tick.public_ask_volume = tick.public_ask_volume / SIZE
+
+        if hasattr(tick, "public_bid_volume"):
+            tick.public_bid_volume = tick.public_bid_volume / SIZE
+            tick.public_ask_volume = tick.public_ask_volume / SIZE
+
+        tick.exchange = self.exchange
+        tick.gateway_name = self.gateway_name
+        tick.__post_init__()
 
         self.gateway.on_tick(tick)
 
     def on_quote(self, data: dict):
         """报价状态更新"""
         quote: QuoteData = parse_quote(data)
+
+        quote.bid_volume = quote.bid_volume / SIZE
+        quote.ask_volume = quote.ask_volume / SIZE
+
+        quote.exchange = self.exchange
+        quote.gateway_name = self.gateway_name
+        quote.__post_init__()
+
         self.gateway.on_quote(quote)
 
     def on_order(self, data: dict):
@@ -391,6 +411,10 @@ class UserApi(TdApi):
         self.orders[order.vt_orderid] = order
 
         # 推送委托
+        order.exchange = self.exchange
+        order.gateway_name = self.gateway_name
+        order.__post_init__()
+
         self.gateway.on_order(order)
 
     def on_trade(self, data: dict):
@@ -400,21 +424,25 @@ class UserApi(TdApi):
         # 调整委托的成交量
         trade.volume = trade.volume / SIZE
 
-        # 过滤非当前API的推送
-        if trade.gateway_name != self.gateway_name:
-            return
-
         # 过滤短线重连后的重复推送
         if trade.vt_tradeid in self.trades:
             return
         self.trades[trade.vt_tradeid] = trade
 
         # 推送成交
+        trade.exchange = self.exchange
+        trade.gateway_name = self.gateway_name
+        trade.__post_init__()
+
         self.gateway.on_trade(trade)
 
     def on_log(self, data: dict):
         """日志推送"""
         log: LogData = parse_log(data)
+        
+        log.gateway_name = self.gateway_name
+        log.__post_init__()
+
         self.gateway.on_log(log)
 
     def on_login(self, data: dict):
@@ -435,9 +463,7 @@ class UserApi(TdApi):
     def on_all_quotes(self, data: Sequence[dict]):
         """查询报价回报"""
         for d in data:
-            quote: QuoteData = parse_quote(d)
-            quote.gateway_name = self.gateway_name
-            self.gateway.on_quote(quote)
+            self.on_quote(d)
 
         self.gateway.write_log("做市报价信息查询成功")
 
@@ -446,8 +472,14 @@ class UserApi(TdApi):
         for d in data:
             for settle_type in ("T0", "T1"):
                 contract: ContractData = parse_contract(d, settle_type)
+
                 contract.size = contract.size * SIZE
+                contract.min_volume = contract.min_volume / SIZE
+
+                contract.exchange = self.exchange
                 contract.gateway_name = self.gateway_name
+                contract.__post_init__()
+
                 self.gateway.on_contract(contract)
 
         self.gateway.write_log("合约信息查询成功")
@@ -455,18 +487,14 @@ class UserApi(TdApi):
     def on_all_orders(self, data: Sequence[dict]):
         """查询委托回报"""
         for d in data:
-            order: OrderData = parse_order(d)
-            order.gateway_name = self.gateway_name
-            self.gateway.on_order(order)
+            self.on_order(d)
 
         self.gateway.write_log("委托信息查询成功")
 
     def on_all_trades(self, data: Sequence[dict]):
         """查询成交回报"""
         for d in data:
-            trade: TradeData = parse_trade(d)
-            trade.gateway_name = self.gateway_name
-            self.gateway.on_trade(trade)
+            self.on_trade(d)
 
         self.gateway.write_log("成交信息查询成功")
 
