@@ -43,7 +43,7 @@ CHINA_TZ = pytz.timezone("Asia/Shanghai")
 SIZE = 10_000_000
 
 
-class ComstarXbondGateway(BaseGateway):
+class ComstarGateway(BaseGateway):
     """ComStar的XBond交易接口"""
 
     default_setting = {
@@ -53,37 +53,40 @@ class ComstarXbondGateway(BaseGateway):
         "Key": ""
     }
 
-    exchanges = [Exchange.XBOND]
+    exchanges = [Exchange.XBOND, Exchange.CFETS]
 
     def __init__(self, event_engine: EventEngine):
         """Constructor"""
-        super().__init__(event_engine, "COMSTAR-XBOND")
-
-        self.exchange: Exchange = Exchange.XBOND
+        super().__init__(event_engine, "COMSTAR")
 
         self.api = UserApi(self)
 
     def connect(self, setting: dict) -> None:
         """连接登录"""
-        td_address = setting["交易服务器"]
+        address = setting["交易服务器"]
         username = setting["用户名"]
         password = setting["密码"]
         key = setting["Key"]
 
-        self.api.connect(username, password, key, td_address)
+        self.api.connect(username, password, key, address)
 
     def subscribe(self, req: SubscribeRequest) -> None:
         """订阅行情"""
         # 代码格式: 180406_T0 / 180406_T1
-        symbol, settle_type, *_ = req.symbol.split("_") + [""]
-        if settle_type not in {"T0", "T1"}:
+        if "_" not in req.symbol:
             self.write_log("请输入清算速度T0或T1")
-            return ""
+            return
 
-        data = vn_encode(req)
-        data["symbol"] = symbol
-        data["settle_type"] = settle_type
-        self.api.subscribe(data, self.gateway_name)
+        symbol, settle_type = req.symbol.split("_")
+        if settle_type not in {"T0", "T1"}:
+            self.write_log("清算速度仅支持T0或T1")
+
+        data = {
+            "symbol": symbol,
+            "exchange": req.exchange.value,
+            "settle_type": settle_type
+        }
+        self.api.subscribe(data)
 
     def send_order(self, req: OrderRequest) -> str:
         """委托下单"""
@@ -94,31 +97,44 @@ class ComstarXbondGateway(BaseGateway):
             self.write_log("仅支持限价单和FAK单")
             return ""
 
-        symbol, settle_type, *_ = req.symbol.split("_") + [""]
-        if settle_type not in {"T0", "T1"}:
+        if "_" not in req.symbol:
             self.write_log("请输入清算速度T0或T1")
-            return ""
+            return
+
+        symbol, settle_type = req.symbol.split("_")
+        if settle_type not in {"T0", "T1"}:
+            self.write_log("清算速度仅支持T0或T1")
 
         # 乘以合约乘数
         req.volume = req.volume * SIZE
 
-        data = vn_encode(req)
-        data["symbol"] = symbol
-        data["settle_type"] = settle_type
-        data["strategy_name"] = data.pop("reference")
+        data = {
+            "symbol": symbol,
+            "exchange": req.exchange.value,
+            "settle_type": settle_type,
+            "direction": req.direction,
+            "type": req.type.value,
+            "price": req.price,
+            "volume": req.volume,
+            "strategy_name": req.reference
+        }
 
-        order_id = self.api.send_order(data, self.gateway_name)
+        order_id = self.api.send_order(data)
 
         # 返回vt_orderid
         return f"{self.gateway_name}.{order_id}"
 
     def cancel_order(self, req: CancelRequest) -> None:
         """委托撤单"""
-        data = vn_encode(req)
         symbol, settle_type, *_ = req.symbol.split("_") + [""]
-        data["symbol"] = symbol
-        data["settle_type"] = settle_type
-        self.api.cancel_order(data, self.gateway_name)
+        
+        data = {
+            "symbol": symbol,
+            "exchange": req.exchange.value,
+            "settle_type": settle_type,
+            "orderid": req.orderid
+        }
+        self.api.cancel_order(data)
 
     def query_account(self) -> None:
         """不支持查询资金"""
@@ -137,40 +153,6 @@ class ComstarXbondGateway(BaseGateway):
     def close(self) -> None:
         """关闭"""
         self.api.close()
-
-    def on_contract(self, contract: ContractData) -> None:
-        """合约推送"""
-        contract.exchange = Exchange.XBOND
-        contract.gateway_name = self.gateway_name
-        contract.__post_init__()
-        super().on_contract(contract)
-
-    def on_tick(self, tick: TickData) -> None:
-        """行情推送"""
-        tick.exchange = Exchange.XBOND
-        tick.gateway_name = self.gateway_name
-        tick.__post_init__()
-        super().on_tick(tick)
-
-    def on_order(self, order: OrderData) -> None:
-        """委托推送"""
-        order.exchange = Exchange.XBOND
-        order.gateway_name = self.gateway_name
-        order.__post_init__()
-        super().on_order(order)
-
-    def on_trade(self, trade: TradeData) -> None:
-        """成交推送"""
-        trade.exchange = Exchange.XBOND
-        trade.gateway_name = self.gateway_name
-        trade.__post_init__()
-        super().on_trade(trade)
-
-    def on_log(self, log: LogData) -> None:
-        """日志推送"""
-        log.gateway_name = self.gateway_name
-        log.__post_init__()
-        super().on_log(log)
 
 
 class ComstarQuoteGateway(BaseGateway):
@@ -199,12 +181,12 @@ class ComstarQuoteGateway(BaseGateway):
 
     def connect(self, setting: dict) -> None:
         """连接登录"""
-        td_address = setting["交易服务器"]
+        address = setting["交易服务器"]
         username = setting["用户名"]
         password = setting["密码"]
         key = setting["Key"]
 
-        self.api.connect(username, password, key, td_address)
+        self.api.connect(username, password, key, address)
 
     def subscribe(self, req: SubscribeRequest) -> None:
         """订阅行情"""
@@ -403,9 +385,9 @@ class UserApi(TdApi):
         # 过滤断线重连后的重复推送
         last_order = self.orders.get(order.vt_orderid, None)
         if (
-                last_order
-                and order.traded == last_order.traded
-                and order.status == last_order.status
+            last_order
+            and order.traded == last_order.traded
+            and order.status == last_order.status
         ):
             return
         self.orders[order.vt_orderid] = order
