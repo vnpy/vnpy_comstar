@@ -50,7 +50,9 @@ class ComstarGateway(BaseGateway):
         "交易服务器": "",
         "用户名": "",
         "密码": "",
-        "Key": ""
+        "Key": "",
+        "routing_type": "5",
+        "valid_until_time": "18:30:00.000"
     }
 
     exchanges = [Exchange.XBOND, Exchange.CFETS]
@@ -61,25 +63,26 @@ class ComstarGateway(BaseGateway):
 
         self.api = UserApi(self)
 
+        self.quote_infos: Dict[str, QuoteInfo] = {}
+
     def connect(self, setting: dict) -> None:
         """连接登录"""
-        address = setting["交易服务器"]
-        username = setting["用户名"]
-        password = setting["密码"]
-        key = setting["Key"]
+        self.address = setting["交易服务器"]
+        self.username = setting["用户名"]
+        self.password = setting["密码"]
+        self.key = setting["Key"]
+        self.routing_type = setting["routing_type"]
+        self.valid_untile_time = setting["valid_until_time"]
 
-        self.api.connect(username, password, key, address)
+        self.api.connect(self.username, self.password, self.key, self.address)
 
     def subscribe(self, req: SubscribeRequest) -> None:
         """订阅行情"""
-        # 代码格式: 180406_T0 / 180406_T1
-        if "_" not in req.symbol:
-            self.write_log("请输入清算速度T0或T1")
+        # 拆分合约代码
+        result = self.split_symbol(req.symbol)
+        if not result:
             return
-
-        symbol, settle_type = req.symbol.split("_")
-        if settle_type not in {"T0", "T1"}:
-            self.write_log("清算速度仅支持T0或T1")
+        symbol, settle_type = result
 
         data = {
             "symbol": symbol,
@@ -90,20 +93,22 @@ class ComstarGateway(BaseGateway):
 
     def send_order(self, req: OrderRequest) -> str:
         """委托下单"""
-        # 不支持开平
-        req.offset = Offset.NONE
+        if req.exchange == Exchange.XBOND:
+            return self.send_xbond_order(req)
+        else:
+            return self.send_cfets_order(req)
 
+    def send_xbond_order(self, req: OrderRequest) -> str:
+        """XBond委托下单"""
         if req.type not in {OrderType.LIMIT, OrderType.FAK}:
             self.write_log("仅支持限价单和FAK单")
             return ""
 
-        if "_" not in req.symbol:
-            self.write_log("请输入清算速度T0或T1")
-            return
-
-        symbol, settle_type = req.symbol.split("_")
-        if settle_type not in {"T0", "T1"}:
-            self.write_log("清算速度仅支持T0或T1")
+        # 拆分合约代码
+        result = self.split_symbol(req.symbol)
+        if not result:
+            return ""
+        symbol, settle_type = result
 
         # 乘以合约乘数
         req.volume = req.volume * SIZE
@@ -119,98 +124,22 @@ class ComstarGateway(BaseGateway):
             "strategy_name": req.reference
         }
 
-        order_id = self.api.send_order(data)
+        order_id: str = self.api.send_order(data)
 
         # 返回vt_orderid
         return f"{self.gateway_name}.{order_id}"
 
-    def cancel_order(self, req: CancelRequest) -> None:
-        """委托撤单"""
-        symbol, settle_type, *_ = req.symbol.split("_") + [""]
-        
-        data = {
-            "symbol": symbol,
-            "exchange": req.exchange.value,
-            "settle_type": settle_type,
-            "orderid": req.orderid
-        }
-        self.api.cancel_order(data)
-
-    def query_account(self) -> None:
-        """不支持查询资金"""
-        pass
-
-    def query_position(self) -> None:
-        """不支持查询持仓"""
-        pass
-
-    def query_all(self) -> None:
-        """初始化查询"""
-        self.api.get_all_contracts()
-        self.api.get_all_orders()
-        self.api.get_all_trades()
-
-    def close(self) -> None:
-        """关闭"""
-        self.api.close()
-
-
-class ComstarQuoteGateway(BaseGateway):
-    """ComStar的双边交易接口"""
-
-    default_setting = {
-        "交易服务器": "",
-        "用户名": "",
-        "密码": "",
-        "Key": "",
-        "routing_type": "5",
-        "valid_until_time": "18:30:00.000"
-    }
-
-    exchanges = [Exchange.CFETS]
-
-    def __init__(self, event_engine: EventEngine):
-        """Constructor"""
-        super().__init__(event_engine, "COMSTAR-QUOTE")
-
-        self.exchange: Exchange = Exchange.CFETS
-
-        self.api = UserApi(self)
-
-        self.quote_infos: Dict[str, QuoteInfo] = {}
-
-    def connect(self, setting: dict) -> None:
-        """连接登录"""
-        address = setting["交易服务器"]
-        username = setting["用户名"]
-        password = setting["密码"]
-        key = setting["Key"]
-
-        self.api.connect(username, password, key, address)
-
-    def subscribe(self, req: SubscribeRequest) -> None:
-        """订阅行情"""
-        symbol, settle_type, *_ = req.symbol.split("_") + [""]
-        if settle_type not in {"T0", "T1"}:
-            self.write_log("请输入清算速度T0或T1")
-            return ""
-
-        data = vn_encode(req)
-        data["symbol"] = symbol
-        data["settle_type"] = settle_type
-        self.api.maker_subscribe(data, self.gateway_name)
-
-    def send_order(self, req: OrderRequest) -> str:
-        """委托下单（FAK）"""
-        req.offset = Offset.NONE
+    def send_cfets_order(self, req: OrderRequest) -> str:
+        """双边委托下单"""
         if req.type not in {OrderType.FAK}:
             self.write_log("仅支持FAK单")
             return ""
 
-        symbol, settle_type, *_ = req.symbol.split("_") + [""]
-        if settle_type not in {"T0", "T1"}:
-            self.write_log("请输入清算速度T0或T1")
+        # 拆分合约代码
+        result = self.split_symbol(req.symbol)
+        if not result:
             return ""
+        symbol, settle_type = result
 
         # 乘以合约乘数
         req.volume = req.volume * SIZE
@@ -232,51 +161,85 @@ class ComstarQuoteGateway(BaseGateway):
         # 委托数量强制转换成整数类型
         req.volume = int(req.volume)
 
-        data = vn_encode(req)
-        data["symbol"] = symbol
-        data["settle_type"] = settle_type
-        data["strategy_name"] = data.pop("reference")
-        data["quoteId"] = info["quoteid"]
-        data["partyID"] = info["partyid"]
-        data["transactTime"] = info["time"]
+        data = {
+            "symbol": symbol,
+            "exchange": req.exchange.value,
+            "settle_type": settle_type,
+            "direction": req.direction,
+            "type": req.type.value,
+            "price": req.price,
+            "volume": req.volume,
+            "strategy_name": req.reference,
+            "quoteId": info["quoteid"],
+            "partyID": info["partyid"],
+            "transactTime": info["time"]
+        }
 
-        self.api.maker_send_order(data, self.gateway_name)
-        return f"{self.gateway_name}.{data['quoteId']}"
+        order_id: str = self.api.maker_send_order(data)
+        return f"{self.gateway_name}.{order_id}"
+
+    def cancel_order(self, req: CancelRequest) -> None:
+        """委托撤单"""
+        # 拆分合约代码
+        result = self.split_symbol(req.symbol)
+        if not result:
+            return
+        symbol, settle_type = result
+
+        data = {
+            "symbol": symbol,
+            "exchange": req.exchange.value,
+            "settle_type": settle_type,
+            "orderid": req.orderid
+        }
+        self.api.cancel_order(data)
 
     def send_quote(self, req: QuoteRequest) -> str:
         """双边报价下单"""
-        symbol, settle_type, *_ = req.symbol.split("_") + [""]
-        if settle_type not in {"T0", "T1"}:
-            self.write_log("请输入清算速度T0或T1")
+        # 拆分合约代码
+        result = self.split_symbol(req.symbol)
+        if not result:
             return ""
+        symbol, settle_type = result
 
         # 乘以合约乘数
         req.bid_volume = req.bid_volume * SIZE
         req.ask_volume = req.ask_volume * SIZE
 
-        data = vn_encode(req)
-        data["symbol"] = symbol
-        data["bid_settle_type"] = data["ask_settle_type"] = settle_type
-        data["quoteTransType"] = "N"
-        data["validUntilTime"] = ComstarQuoteGateway.default_setting["valid_until_time"]
-        data["routingType"] = ComstarQuoteGateway.default_setting["routing_type"]
-        data["strategy_name"] = data.pop("reference")
-
-        quote_id = self.api.maker_send_quote(data, self.gateway_name)
+        data = {
+            "symbol": symbol,
+            "exchange": req.exchange.value,
+            "bid_settle_type": settle_type,
+            "bid_price": req.bid_price,
+            "bid_volume": req.bid_volume,
+            "ask_price": req.ask_price,
+            "ask_volume": req.ask_volume,
+            "ask_settle_type": settle_type,
+            "quoteTransType": "N",
+            "validUntilTime": self.valid_untile_time,
+            "routingType": self.routing_type,
+            "strategy_name": req.reference
+        }
+        
+        quote_id = self.api.maker_send_quote(data)
         return f"{self.gateway_name}.{quote_id}"
-
-    def cancel_order(self, req: CancelRequest) -> None:
-        """FOK委托不支持撤单"""
-        pass
 
     def cancel_quote(self, req: CancelRequest) -> None:
         """报价撤单"""
-        data = vn_encode(req)
-        symbol, settle_type, *_ = req.symbol.split("_") + [""]
-        data["symbol"] = symbol
-        data["settle_type"] = settle_type
-        data["routingType"] = ComstarQuoteGateway.default_setting["routing_type"]
-        self.api.cancel_quote(data, self.gateway_name)
+        # 拆分合约代码
+        result = self.split_symbol(req.symbol)
+        if not result:
+            return
+        symbol, settle_type = result
+
+        data = {
+            "symbol": symbol,
+            "exchange": req.exchange.value,
+            "settle_type": settle_type,
+            "orderid": req.orderid,
+            "routingType": self.routing_type
+        }
+        self.api.cancel_quote(data)
 
     def query_account(self) -> None:
         """不支持查询资金"""
@@ -286,12 +249,12 @@ class ComstarQuoteGateway(BaseGateway):
         """不支持查询持仓"""
         pass
 
-    def maker_query_all(self) -> None:
+    def query_all(self) -> None:
         """初始化查询"""
         self.api.get_all_contracts()
-        self.api.maker_get_all_quotes()
-        self.api.maker_get_all_orders()
-        self.api.maker_get_all_trades()
+        self.api.get_all_orders()
+        self.api.get_all_trades()
+        self.api.get_all_quotes()
 
     def close(self) -> None:
         """关闭"""
@@ -306,6 +269,23 @@ class ComstarQuoteGateway(BaseGateway):
             self.quote_infos[vt_symbol] = quote_info
 
         quote_info.update_info(data)
+
+    def split_symbol(self, symbol: str) -> Optional[tuple]:
+        """
+        拆分合约代码
+
+        代码格式: 180406_T0 / 180406_T1
+        """
+        if "_" not in symbol:
+            self.write_log("请输入清算速度T0或T1")
+            return None
+
+        new_symbol, settle_type = symbol.split("_")
+        if settle_type not in {"T0", "T1"}:
+            self.write_log("清算速度仅支持T0或T1")
+            return None
+
+        return new_symbol, settle_type
 
 
 class UserApi(TdApi):
@@ -672,20 +652,6 @@ def enum_decode(s: str) -> Optional[Enum]:
         return getattr(VN_ENUMS[name], member)
     else:
         return None
-
-
-def vn_encode(obj: object) -> str or dict:
-    """将对象打包为JSON格式的字典"""
-    if type(obj) in VN_ENUMS.values():
-        return str(obj)
-    else:
-        s = {}
-        for (k, v) in obj.__dict__.items():
-            if type(v) in VN_ENUMS.values():
-                s[k] = vn_encode(v)
-            else:
-                s[k] = str(v)
-        return s
 
 
 def generate_datetime(time: str) -> datetime:
