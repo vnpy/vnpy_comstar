@@ -86,10 +86,15 @@ class ComstarGateway(BaseGateway):
 
         data = {
             "symbol": symbol,
-            "exchange": req.exchange.value,
-            "settle_type": settle_type
+            "exchange": str(req.exchange),
+            "settle_type": settle_type,
+            "vt_symbol": req.vt_symbol
         }
-        self.api.subscribe(data)
+
+        if req.exchange == Exchange.XBOND:
+            self.api.subscribe(data, self.gateway_name)
+        else:
+            self.api.maker_subscribe(data, self.gateway_name)
 
     def send_order(self, req: OrderRequest) -> str:
         """委托下单"""
@@ -115,16 +120,17 @@ class ComstarGateway(BaseGateway):
 
         data = {
             "symbol": symbol,
-            "exchange": req.exchange.value,
+            "exchange": str(req.exchange),
             "settle_type": settle_type,
-            "direction": req.direction,
-            "type": req.type.value,
+            "direction": str(req.direction),
+            "type": str(req.type),
             "price": req.price,
             "volume": req.volume,
-            "strategy_name": req.reference
+            "strategy_name": req.reference,
+            "vt_symbol": req.vt_symbol,
+            "offset": str(Offset.NONE)
         }
-
-        order_id: str = self.api.send_order(data)
+        order_id: str = self.api.send_order(data, self.gateway_name)
 
         # 返回vt_orderid
         return f"{self.gateway_name}.{order_id}"
@@ -156,26 +162,27 @@ class ComstarGateway(BaseGateway):
 
         if not info:
             self.write_log(f"找不到{req.vt_symbol}指定价格{req.price}的报价信息")
-            return
+            return ""
 
         # 委托数量强制转换成整数类型
         req.volume = int(req.volume)
 
         data = {
             "symbol": symbol,
-            "exchange": req.exchange.value,
+            "exchange": str(req.exchange),
             "settle_type": settle_type,
-            "direction": req.direction,
-            "type": req.type.value,
+            "direction": str(req.direction),
+            "type": str(req.type),
             "price": req.price,
             "volume": req.volume,
             "strategy_name": req.reference,
             "quoteId": info["quoteid"],
             "partyID": info["partyid"],
-            "transactTime": info["time"]
+            "transactTime": info["time"],
+            "vt_symbol": req.vt_symbol
         }
 
-        order_id: str = self.api.maker_send_order(data)
+        order_id: str = self.api.maker_send_order(data, self.gateway_name)
         return f"{self.gateway_name}.{order_id}"
 
     def cancel_order(self, req: CancelRequest) -> None:
@@ -188,11 +195,12 @@ class ComstarGateway(BaseGateway):
 
         data = {
             "symbol": symbol,
-            "exchange": req.exchange.value,
+            "exchange": str(req.exchange),
             "settle_type": settle_type,
-            "orderid": req.orderid
+            "orderid": req.orderid,
+            "vt_symbol": req.vt_symbol
         }
-        self.api.cancel_order(data)
+        self.api.cancel_order(data, self.gateway_name)
 
     def send_quote(self, req: QuoteRequest) -> str:
         """双边报价下单"""
@@ -208,7 +216,7 @@ class ComstarGateway(BaseGateway):
 
         data = {
             "symbol": symbol,
-            "exchange": req.exchange.value,
+            "exchange": str(req.exchange),
             "bid_settle_type": settle_type,
             "bid_price": req.bid_price,
             "bid_volume": req.bid_volume,
@@ -218,10 +226,11 @@ class ComstarGateway(BaseGateway):
             "quoteTransType": "N",
             "validUntilTime": self.valid_untile_time,
             "routingType": self.routing_type,
-            "strategy_name": req.reference
+            "strategy_name": req.reference,
+            "vt_symbol": req.vt_symbol
         }
-        
-        quote_id = self.api.maker_send_quote(data)
+
+        quote_id = self.api.maker_send_quote(data, self.gateway_name)
         return f"{self.gateway_name}.{quote_id}"
 
     def cancel_quote(self, req: CancelRequest) -> None:
@@ -234,12 +243,13 @@ class ComstarGateway(BaseGateway):
 
         data = {
             "symbol": symbol,
-            "exchange": req.exchange.value,
+            "exchange": str(req.exchange),
             "settle_type": settle_type,
             "orderid": req.orderid,
-            "routingType": self.routing_type
+            "routingType": self.routing_type,
+            "vt_symbol": req.vt_symbol
         }
-        self.api.cancel_quote(data)
+        self.api.cancel_quote(data, self.gateway_name)
 
     def query_account(self) -> None:
         """不支持查询资金"""
@@ -299,7 +309,7 @@ class UserApi(TdApi):
 
         self.gateway: BaseGateway = gateway
         self.gateway_name: str = gateway.gateway_name
-        self.exchange: Exchange = gateway.exchange
+        # self.exchange: Exchange = gateway.exchange
 
         self.trades: Dict[str, TradeData] = {}
         self.orders: Dict[str, OrderData] = {}
@@ -309,12 +319,11 @@ class UserApi(TdApi):
         if data["gateway_name"] == "COMSTAR-QUOTE":
             # 将交易中心格式转换为本地格式
             converted_data = convert_quote_tick(data)
-
             # 生成Tick对象
             tick: TickData = parse_quote_tick(converted_data)
-
             # 更新报价周边信息
             self.gateway.update_quote_info(tick.vt_symbol, converted_data)
+
         else:
             tick: TickData = parse_tick(data)
 
@@ -335,8 +344,6 @@ class UserApi(TdApi):
             tick.public_bid_volume = tick.public_bid_volume / SIZE
             tick.public_ask_volume = tick.public_ask_volume / SIZE
 
-        tick.exchange = self.exchange
-        tick.gateway_name = self.gateway_name
         tick.__post_init__()
 
         self.gateway.on_tick(tick)
@@ -348,8 +355,6 @@ class UserApi(TdApi):
         quote.bid_volume = quote.bid_volume / SIZE
         quote.ask_volume = quote.ask_volume / SIZE
 
-        quote.exchange = self.exchange
-        quote.gateway_name = self.gateway_name
         quote.__post_init__()
 
         self.gateway.on_quote(quote)
@@ -373,8 +378,6 @@ class UserApi(TdApi):
         self.orders[order.vt_orderid] = order
 
         # 推送委托
-        order.exchange = self.exchange
-        order.gateway_name = self.gateway_name
         order.__post_init__()
 
         self.gateway.on_order(order)
@@ -392,8 +395,6 @@ class UserApi(TdApi):
         self.trades[trade.vt_tradeid] = trade
 
         # 推送成交
-        trade.exchange = self.exchange
-        trade.gateway_name = self.gateway_name
         trade.__post_init__()
 
         self.gateway.on_trade(trade)
@@ -402,7 +403,6 @@ class UserApi(TdApi):
         """日志推送"""
         log: LogData = parse_log(data)
         
-        log.gateway_name = self.gateway_name
         log.__post_init__()
 
         self.gateway.on_log(log)
@@ -438,8 +438,6 @@ class UserApi(TdApi):
                 contract.size = contract.size * SIZE
                 contract.min_volume = contract.min_volume / SIZE
 
-                contract.exchange = self.exchange
-                contract.gateway_name = self.gateway_name
                 contract.__post_init__()
 
                 self.gateway.on_contract(contract)
@@ -565,7 +563,7 @@ def parse_quote_tick(data: dict) -> TickData:
         ask_price_5=data.get("ask_price_5", 0),
         bid_volume_5=data.get("bid_volume_5", 0),
         ask_volume_5=data.get("ask_volume_5", 0),
-        gateway_name=data["gateway_name"],
+        gateway_name=data["gateway_name"]
     )
     return tick
 
