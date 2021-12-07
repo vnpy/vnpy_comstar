@@ -22,7 +22,7 @@
 
 import importlib_metadata
 
-from .gateway import ComstarXbondGateway, ComstarQuoteGateway
+from .gateway import ComstarGateway
 
 
 try:

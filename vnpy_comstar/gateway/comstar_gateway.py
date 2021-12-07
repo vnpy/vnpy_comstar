@@ -309,7 +309,6 @@ class UserApi(TdApi):
 
         self.gateway: BaseGateway = gateway
         self.gateway_name: str = gateway.gateway_name
-        # self.exchange: Exchange = gateway.exchange
 
         self.trades: Dict[str, TradeData] = {}
         self.orders: Dict[str, OrderData] = {}
@@ -344,7 +343,7 @@ class UserApi(TdApi):
             tick.public_bid_volume = tick.public_bid_volume / SIZE
             tick.public_ask_volume = tick.public_ask_volume / SIZE
 
-        tick.__post_init__()
+        tick.gateway_name = self.gateway_name
 
         self.gateway.on_tick(tick)
 
@@ -355,7 +354,7 @@ class UserApi(TdApi):
         quote.bid_volume = quote.bid_volume / SIZE
         quote.ask_volume = quote.ask_volume / SIZE
 
-        quote.__post_init__()
+        quote.gateway_name = self.gateway_name
 
         self.gateway.on_quote(quote)
 
@@ -378,7 +377,7 @@ class UserApi(TdApi):
         self.orders[order.vt_orderid] = order
 
         # 推送委托
-        order.__post_init__()
+        order.gateway_name = self.gateway_name
 
         self.gateway.on_order(order)
 
@@ -395,7 +394,7 @@ class UserApi(TdApi):
         self.trades[trade.vt_tradeid] = trade
 
         # 推送成交
-        trade.__post_init__()
+        trade.gateway_name = self.gateway_name
 
         self.gateway.on_trade(trade)
 
@@ -403,7 +402,7 @@ class UserApi(TdApi):
         """日志推送"""
         log: LogData = parse_log(data)
         
-        log.__post_init__()
+        log.gateway_name = self.gateway_name
 
         self.gateway.on_log(log)
 
@@ -433,14 +432,16 @@ class UserApi(TdApi):
         """查询合约回报"""
         for d in data:
             for settle_type in ("T0", "T1"):
-                contract: ContractData = parse_contract(d, settle_type)
+                for exchange in (Exchange.XBOND, Exchange.CFETS):
+                    contract: ContractData = parse_contract(d, settle_type)
 
-                contract.size = contract.size * SIZE
-                contract.min_volume = contract.min_volume / SIZE
+                    contract.size = contract.size * SIZE
+                    contract.min_volume = contract.min_volume / SIZE
+                    contract.exchange = exchange
+                    contract.gateway_name = self.gateway_name
 
-                contract.__post_init__()
-
-                self.gateway.on_contract(contract)
+                    contract.__post_init__()
+                    self.gateway.on_contract(contract)
 
         self.gateway.write_log("合约信息查询成功")
 
