@@ -25,6 +25,7 @@ from vnpy.trader.object import (
     LogData,
     QuoteData
 )
+from vnpy.trader.utility import round_to
 
 from .comstar_api import TdApi
 
@@ -116,7 +117,7 @@ class ComstarGateway(BaseGateway):
         symbol, settle_type = result
 
         # 乘以合约乘数
-        req.volume = req.volume * SIZE
+        volume = req.volume * SIZE
 
         data = {
             "symbol": symbol,
@@ -125,12 +126,16 @@ class ComstarGateway(BaseGateway):
             "direction": str(req.direction),
             "type": str(req.type),
             "price": req.price,
-            "volume": req.volume,
+            "volume": volume,
             "strategy_name": req.reference,
             "vt_symbol": req.vt_symbol,
             "offset": str(Offset.NONE)
         }
         order_id: str = self.api.send_order(data, self.gateway_name)
+
+        # 推送提交中状态
+        order = req.create_order_data(order_id, self.gateway_name)
+        self.on_order(order)
 
         # 返回vt_orderid
         return f"{self.gateway_name}.{order_id}"
@@ -148,7 +153,7 @@ class ComstarGateway(BaseGateway):
         symbol, settle_type = result
 
         # 乘以合约乘数
-        req.volume = req.volume * SIZE
+        volume = req.volume * SIZE
 
         quote_info: QuoteInfo = self.quote_infos.get(req.vt_symbol, None)
         if not quote_info:
@@ -165,7 +170,7 @@ class ComstarGateway(BaseGateway):
             return ""
 
         # 委托数量强制转换成整数类型
-        req.volume = int(req.volume)
+        volume = int(volume)
 
         data = {
             "symbol": symbol,
@@ -174,7 +179,7 @@ class ComstarGateway(BaseGateway):
             "direction": str(req.direction),
             "type": str(req.type),
             "price": req.price,
-            "volume": req.volume,
+            "volume": volume,
             "strategy_name": req.reference,
             "quoteId": info["quoteid"],
             "partyID": info["partyid"],
@@ -183,6 +188,11 @@ class ComstarGateway(BaseGateway):
         }
 
         order_id: str = self.api.maker_send_order(data, self.gateway_name)
+
+        # 推送提交中状态
+        order = req.create_order_data(order_id, self.gateway_name)
+        self.on_order(order)
+
         return f"{self.gateway_name}.{order_id}"
 
     def cancel_order(self, req: CancelRequest) -> None:
@@ -211,17 +221,17 @@ class ComstarGateway(BaseGateway):
         symbol, settle_type = result
 
         # 乘以合约乘数
-        req.bid_volume = req.bid_volume * SIZE
-        req.ask_volume = req.ask_volume * SIZE
+        bid_volume = req.bid_volume * SIZE
+        ask_volume = req.ask_volume * SIZE
 
         data = {
             "symbol": symbol,
             "exchange": str(req.exchange),
             "bid_settle_type": settle_type,
             "bid_price": req.bid_price,
-            "bid_volume": req.bid_volume,
+            "bid_volume": bid_volume,
             "ask_price": req.ask_price,
-            "ask_volume": req.ask_volume,
+            "ask_volume": ask_volume,
             "ask_settle_type": settle_type,
             "quoteTransType": "N",
             "validUntilTime": self.valid_untile_time,
@@ -231,6 +241,11 @@ class ComstarGateway(BaseGateway):
         }
 
         quote_id = self.api.maker_send_quote(data, self.gateway_name)
+
+        # 推送提交中状态
+        quote = req.create_quote_data(quote_id, self.gateway_name)
+        self.on_quote(quote)
+
         return f"{self.gateway_name}.{quote_id}"
 
     def cancel_quote(self, req: CancelRequest) -> None:
@@ -315,14 +330,22 @@ class UserApi(TdApi):
 
     def on_tick(self, data: dict):
         """行情推送"""
+        # 双边行情
         if data["gateway_name"] == "COMSTAR-QUOTE":
             # 将交易中心格式转换为本地格式
             converted_data = convert_quote_tick(data)
+            
             # 生成Tick对象
             tick: TickData = parse_quote_tick(converted_data)
+            
             # 更新报价周边信息
             self.gateway.update_quote_info(tick.vt_symbol, converted_data)
 
+            # 用BID/ASK中间价表示最新价
+            if tick.ask_price_1 and tick.bid_price_1:
+                tick.last_price = (tick.ask_price_1 + tick.bid_price_1) / 2
+                tick.last_price = round_to(tick.last_price, 0.0001)
+        # XBOND行情
         else:
             tick: TickData = parse_tick(data)
 
@@ -344,12 +367,17 @@ class UserApi(TdApi):
             tick.public_ask_volume = tick.public_ask_volume / SIZE
 
         tick.gateway_name = self.gateway_name
+        tick.localtime = datetime.now()
 
         self.gateway.on_tick(tick)
 
     def on_quote(self, data: dict):
         """报价状态更新"""
         quote: QuoteData = parse_quote(data)
+
+        # 过滤服务端推送的SUBMITTING提交中状态
+        if quote.status == Status.SUBMITTING:
+            return
 
         quote.bid_volume = quote.bid_volume / SIZE
         quote.ask_volume = quote.ask_volume / SIZE
@@ -361,6 +389,10 @@ class UserApi(TdApi):
     def on_order(self, data: dict):
         """委托状态更新"""
         order: OrderData = parse_order(data)
+
+        # 过滤服务端推送的SUBMITTING提交中状态
+        if order.status == Status.SUBMITTING:
+            return
 
         # 调整委托的数量和成交量
         order.volume = order.volume / SIZE
@@ -388,7 +420,7 @@ class UserApi(TdApi):
         # 调整委托的成交量
         trade.volume = trade.volume / SIZE
 
-        # 过滤短线重连后的重复推送
+        # 过滤断线重连后的重复推送
         if trade.vt_tradeid in self.trades:
             return
         self.trades[trade.vt_tradeid] = trade
