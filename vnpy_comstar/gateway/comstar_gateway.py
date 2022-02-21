@@ -47,6 +47,8 @@ SIZE = 10_000_000
 class ComstarGateway(BaseGateway):
     """ComStar的XBond交易接口"""
 
+    default_name: str = "COMSTAR"
+
     default_setting = {
         "交易服务器": "",
         "用户名": "",
@@ -58,9 +60,9 @@ class ComstarGateway(BaseGateway):
 
     exchanges = [Exchange.XBOND, Exchange.CFETS]
 
-    def __init__(self, event_engine: EventEngine):
+    def __init__(self, event_engine: EventEngine, gateway_name: str):
         """Constructor"""
-        super().__init__(event_engine, "COMSTAR")
+        super().__init__(event_engine, gateway_name)
 
         self.api = UserApi(self)
 
