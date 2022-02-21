@@ -1,1 +1,1 @@
-from .comstar_gateway import ComstarXbondGateway, ComstarQuoteGateway
+from .comstar_gateway import ComstarGateway
