@@ -336,10 +336,10 @@ class UserApi(TdApi):
         if data["gateway_name"] == "COMSTAR-QUOTE":
             # 将交易中心格式转换为本地格式
             converted_data = convert_quote_tick(data)
-            
+
             # 生成Tick对象
             tick: TickData = parse_quote_tick(converted_data)
-            
+
             # 更新报价周边信息
             self.gateway.update_quote_info(tick.vt_symbol, converted_data)
 
@@ -435,7 +435,7 @@ class UserApi(TdApi):
     def on_log(self, data: dict):
         """日志推送"""
         log: LogData = parse_log(data)
-        
+
         log.gateway_name = self.gateway_name
 
         self.gateway.on_log(log)
