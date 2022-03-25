@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, Sequence, Dict
+from typing import List, Optional, Sequence, Dict, Any
 from enum import Enum
 import pytz
 
@@ -30,7 +30,8 @@ from vnpy.trader.utility import round_to
 from .comstar_api import TdApi
 
 
-VN_ENUMS = {
+# 枚举值映射
+VN_ENUMS: Dict[str, Any] = {
     "Exchange": Exchange,
     "Product": Product,
     "Offset": Offset,
@@ -39,17 +40,19 @@ VN_ENUMS = {
     "Status": Status
 }
 
-CHINA_TZ = pytz.timezone("Asia/Shanghai")
-
-SIZE = 10_000_000
+# 其他常量
+CHINA_TZ = pytz.timezone("Asia/Shanghai")       # 中国时区
+SIZE = 10_000_000                               # 合约乘数
 
 
 class ComstarGateway(BaseGateway):
-    """ComStar的XBond交易接口"""
+    """
+    VeighNa用于对接ComStar的XBond交易接口。
+    """
 
     default_name: str = "COMSTAR"
 
-    default_setting = {
+    default_setting: Dict[str, str] = {
         "交易服务器": "",
         "用户名": "",
         "密码": "",
@@ -58,36 +61,36 @@ class ComstarGateway(BaseGateway):
         "valid_until_time": "18:30:00.000"
     }
 
-    exchanges = [Exchange.XBOND, Exchange.CFETS]
+    exchanges: List[Exchange] = [Exchange.XBOND, Exchange.CFETS]
 
     def __init__(self, event_engine: EventEngine, gateway_name: str):
-        """Constructor"""
+        """构造函数"""
         super().__init__(event_engine, gateway_name)
 
-        self.api = UserApi(self)
+        self.api: "UserApi" = UserApi(self)
 
         self.quote_infos: Dict[str, QuoteInfo] = {}
 
     def connect(self, setting: dict) -> None:
         """连接登录"""
-        self.address = setting["交易服务器"]
-        self.username = setting["用户名"]
-        self.password = setting["密码"]
-        self.key = setting["Key"]
-        self.routing_type = setting["routing_type"]
-        self.valid_untile_time = setting["valid_until_time"]
+        self.address: str = setting["交易服务器"]
+        self.username: str = setting["用户名"]
+        self.password: str = setting["密码"]
+        self.key: str = setting["Key"]
+        self.routing_type: str = setting["routing_type"]
+        self.valid_untile_time: str = setting["valid_until_time"]
 
         self.api.connect(self.username, self.password, self.key, self.address)
 
     def subscribe(self, req: SubscribeRequest) -> None:
         """订阅行情"""
         # 拆分合约代码
-        result = self.split_symbol(req.symbol)
+        result: tuple = self.split_symbol(req.symbol)
         if not result:
             return
         symbol, settle_type = result
 
-        data = {
+        data: dict = {
             "symbol": symbol,
             "exchange": str(req.exchange),
             "settle_type": settle_type,
@@ -113,7 +116,7 @@ class ComstarGateway(BaseGateway):
             return ""
 
         # 拆分合约代码
-        result = self.split_symbol(req.symbol)
+        result: tuple = self.split_symbol(req.symbol)
         if not result:
             return ""
         symbol, settle_type = result
@@ -121,7 +124,7 @@ class ComstarGateway(BaseGateway):
         # 乘以合约乘数
         volume = req.volume * SIZE
 
-        data = {
+        data: dict = {
             "symbol": symbol,
             "exchange": str(req.exchange),
             "settle_type": settle_type,
@@ -136,7 +139,7 @@ class ComstarGateway(BaseGateway):
         order_id: str = self.api.send_order(data, self.gateway_name)
 
         # 推送提交中状态
-        order = req.create_order_data(order_id, self.gateway_name)
+        order: OrderData = req.create_order_data(order_id, self.gateway_name)
         self.on_order(order)
 
         # 返回vt_orderid
@@ -149,7 +152,7 @@ class ComstarGateway(BaseGateway):
             return ""
 
         # 拆分合约代码
-        result = self.split_symbol(req.symbol)
+        result: tuple = self.split_symbol(req.symbol)
         if not result:
             return ""
         symbol, settle_type = result
@@ -163,18 +166,18 @@ class ComstarGateway(BaseGateway):
             return ""
 
         if req.direction == Direction.LONG:
-            info = quote_info.ask_info.get(req.price, None)
+            info: dict = quote_info.ask_info.get(req.price, None)
         else:
-            info = quote_info.bid_info.get(req.price, None)
+            info: dict = quote_info.bid_info.get(req.price, None)
 
         if not info:
             self.write_log(f"找不到{req.vt_symbol}指定价格{req.price}的报价信息")
             return ""
 
         # 委托数量强制转换成整数类型
-        volume = int(volume)
+        volume: int = int(volume)
 
-        data = {
+        data: dict = {
             "symbol": symbol,
             "exchange": str(req.exchange),
             "settle_type": settle_type,
@@ -192,7 +195,7 @@ class ComstarGateway(BaseGateway):
         order_id: str = self.api.maker_send_order(data, self.gateway_name)
 
         # 推送提交中状态
-        order = req.create_order_data(order_id, self.gateway_name)
+        order: OrderData = req.create_order_data(order_id, self.gateway_name)
         self.on_order(order)
 
         return f"{self.gateway_name}.{order_id}"
@@ -200,12 +203,12 @@ class ComstarGateway(BaseGateway):
     def cancel_order(self, req: CancelRequest) -> None:
         """委托撤单"""
         # 拆分合约代码
-        result = self.split_symbol(req.symbol)
+        result: tuple = self.split_symbol(req.symbol)
         if not result:
             return
         symbol, settle_type = result
 
-        data = {
+        data: dict = {
             "symbol": symbol,
             "exchange": str(req.exchange),
             "settle_type": settle_type,
@@ -217,7 +220,7 @@ class ComstarGateway(BaseGateway):
     def send_quote(self, req: QuoteRequest) -> str:
         """双边报价下单"""
         # 拆分合约代码
-        result = self.split_symbol(req.symbol)
+        result: tuple = self.split_symbol(req.symbol)
         if not result:
             return ""
         symbol, settle_type = result
@@ -226,7 +229,7 @@ class ComstarGateway(BaseGateway):
         bid_volume = req.bid_volume * SIZE
         ask_volume = req.ask_volume * SIZE
 
-        data = {
+        data: dict = {
             "symbol": symbol,
             "exchange": str(req.exchange),
             "bid_settle_type": settle_type,
@@ -242,10 +245,10 @@ class ComstarGateway(BaseGateway):
             "vt_symbol": req.vt_symbol
         }
 
-        quote_id = self.api.maker_send_quote(data, self.gateway_name)
+        quote_id: str = self.api.maker_send_quote(data, self.gateway_name)
 
         # 推送提交中状态
-        quote = req.create_quote_data(quote_id, self.gateway_name)
+        quote: QuoteData = req.create_quote_data(quote_id, self.gateway_name)
         self.on_quote(quote)
 
         return f"{self.gateway_name}.{quote_id}"
@@ -253,12 +256,12 @@ class ComstarGateway(BaseGateway):
     def cancel_quote(self, req: CancelRequest) -> None:
         """报价撤单"""
         # 拆分合约代码
-        result = self.split_symbol(req.symbol)
+        result: tuple = self.split_symbol(req.symbol)
         if not result:
             return
         symbol, settle_type = result
 
-        data = {
+        data: dict = {
             "symbol": symbol,
             "exchange": str(req.exchange),
             "settle_type": settle_type,
@@ -321,7 +324,7 @@ class UserApi(TdApi):
     """
 
     def __init__(self, gateway):
-        """Constructor"""
+        """构造函数"""
         super().__init__()
 
         self.gateway: BaseGateway = gateway
@@ -335,7 +338,7 @@ class UserApi(TdApi):
         # 双边行情
         if data["gateway_name"] == "COMSTAR-QUOTE":
             # 将交易中心格式转换为本地格式
-            converted_data = convert_quote_tick(data)
+            converted_data: dict = convert_quote_tick(data)
 
             # 生成Tick对象
             tick: TickData = parse_quote_tick(converted_data)
@@ -401,7 +404,7 @@ class UserApi(TdApi):
         order.traded = order.traded / SIZE
 
         # 过滤断线重连后的重复推送
-        last_order = self.orders.get(order.vt_orderid, None)
+        last_order: OrderData = self.orders.get(order.vt_orderid, None)
         if (
             last_order
             and order.traded == last_order.traded
@@ -509,7 +512,7 @@ def parse_tick(data: dict) -> TickData:
     1. Bid/Ask1是共有最优行情
     2. Bid/Ask2-6是私有最优行情
     """
-    tick = TickData(
+    tick: TickData = TickData(
         symbol=f"{data['symbol']}_{data['settle_type']}",
         exchange=enum_decode(data["exchange"]),
         datetime=parse_datetime(data["datetime"]),
@@ -553,7 +556,7 @@ def parse_tick(data: dict) -> TickData:
 
 def parse_quote(data: dict) -> QuoteData:
     """解析报价数据"""
-    quote = QuoteData(
+    quote: QuoteData = QuoteData(
         symbol=f"{data['securityId']}_{data['buySideVO']['settlType']}",
         exchange=enum_decode(data["exchange"]),
         quoteid=data["quoteid"],
@@ -567,13 +570,12 @@ def parse_quote(data: dict) -> QuoteData:
         datetime=generate_datetime(data["transactTime"]),
         gateway_name=data["gateway_name"]
     )
-
     return quote
 
 
 def parse_quote_tick(data: dict) -> TickData:
     """解析双边行情数据"""
-    tick = TickData(
+    tick: TickData = TickData(
         symbol=f"{data['symbol']}_{data['settle_type']}",
         exchange=enum_decode(data["exchange"]),
         datetime=parse_datetime(data["datetime"]),
@@ -605,7 +607,7 @@ def parse_quote_tick(data: dict) -> TickData:
 
 def parse_order(data: dict) -> OrderData:
     """解析委托更新数据"""
-    order = OrderData(
+    order: OrderData = OrderData(
         symbol=f"{data['symbol']}_{data['settle_type']}",
         exchange=enum_decode(data["exchange"]),
         orderid=data["orderid"],
@@ -624,7 +626,7 @@ def parse_order(data: dict) -> OrderData:
 
 def parse_trade(data: dict) -> TradeData:
     """解析成交推送数据"""
-    trade = TradeData(
+    trade: TradeData = TradeData(
         symbol=f"{data['symbol']}_{data['settle_type']}",
         exchange=enum_decode(data["exchange"]),
         orderid=data["orderid"],
@@ -641,7 +643,7 @@ def parse_trade(data: dict) -> TradeData:
 
 def parse_contract(data: dict, settle_type: str) -> ContractData:
     """解析交易合约数据"""
-    contract = ContractData(
+    contract: ContractData = ContractData(
         symbol=f"{data['symbol']}_{settle_type}",
         exchange=enum_decode(data["exchange"]),
         name=data["name"],
@@ -656,7 +658,7 @@ def parse_contract(data: dict, settle_type: str) -> ContractData:
 
 def parse_log(data: dict) -> LogData:
     """解析日志信息数据"""
-    log = LogData(
+    log: LogData = LogData(
         msg=data["msg"],
         level=data["level"],
         gateway_name=data["gateway_name"]
@@ -668,13 +670,13 @@ def parse_log(data: dict) -> LogData:
 def parse_datetime(s: str) -> datetime:
     """解析时间戳字符串"""
     if "." in s:
-        dt = datetime.strptime(s, "%Y%m%d %H:%M:%S.%f")
+        dt: datetime = datetime.strptime(s, "%Y%m%d %H:%M:%S.%f")
     elif len(s) > 0:
-        dt = datetime.strptime(s, "%Y%m%d %H:%M:%S")
+        dt: datetime = datetime.strptime(s, "%Y%m%d %H:%M:%S")
     else:
-        dt = datetime.now()
+        dt: datetime = datetime.now()
 
-    dt = dt.astimezone(CHINA_TZ)
+    dt: datetime = dt.astimezone(CHINA_TZ)
     return dt
 
 
@@ -689,15 +691,15 @@ def enum_decode(s: str) -> Optional[Enum]:
 
 def generate_datetime(time: str) -> datetime:
     """生成时间戳"""
-    today = datetime.now().strftime("%Y%m%d")
-    timestamp = f"{today} {time}"
-    dt = parse_datetime(timestamp)
+    today: str = datetime.now().strftime("%Y%m%d")
+    timestamp: str = f"{today} {time}"
+    dt: datetime = parse_datetime(timestamp)
     return dt
 
 
 def convert_quote_tick(data: dict) -> dict:
     """转换双边市场的Tick数据格式"""
-    tick_data = {
+    tick_data: dict = {
         "datetime": data["datetime"],
         "gateway_name": data["gateway_name"],
         "symbol": data["securityId"],
@@ -706,12 +708,12 @@ def convert_quote_tick(data: dict) -> dict:
         "settle_type": "T0" if data["settlType"] == "1" else "T1"
     }
 
-    level_map = data["qdmEspMarketDataLevelMap"]
+    level_map: dict = data["qdmEspMarketDataLevelMap"]
 
     for i in range(1, 11):
         # 获取当前深度数据
         depth = str(i)
-        d = level_map.get(depth, None)
+        d: dict = level_map.get(depth, None)
 
         # 如果没有则结束循环
         if not d:
