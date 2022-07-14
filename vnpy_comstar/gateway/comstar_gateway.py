@@ -1,7 +1,6 @@
 from datetime import datetime
 from typing import List, Optional, Sequence, Dict, Any
 from enum import Enum
-import pytz
 
 from vnpy.event import EventEngine
 from vnpy.trader.gateway import BaseGateway
@@ -25,7 +24,7 @@ from vnpy.trader.object import (
     LogData,
     QuoteData
 )
-from vnpy.trader.utility import round_to
+from vnpy.trader.utility import round_to, ZoneInfo
 
 from .comstar_api import TdApi
 
@@ -41,7 +40,7 @@ VN_ENUMS: Dict[str, Any] = {
 }
 
 # 其他常量
-CHINA_TZ = pytz.timezone("Asia/Shanghai")       # 中国时区
+CHINA_TZ = ZoneInfo("Asia/Shanghai")       # 中国时区
 SIZE = 10_000_000                               # 合约乘数
 
 
