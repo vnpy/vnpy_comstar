@@ -17,7 +17,7 @@
 
 ## 安装
 
-安装环境推荐基于3.3.0版本以上的【[**VeighNa Studio**](https://www.vnpy.com)】。
+安装环境推荐基于3.3.0版本以上的【[**VeighNa Studio**](https://www.vnpy.com)】和Python3.7环境。
 
 直接使用pip命令：
 
