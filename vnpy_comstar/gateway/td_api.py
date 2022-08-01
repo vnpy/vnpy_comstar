@@ -15,7 +15,7 @@ class TdApi:
     def subscribe(self, data: dict) -> None:
         """
         订阅行情
-        
+
         数据字段：
         symbol
         exchange
@@ -26,7 +26,7 @@ class TdApi:
     def send_order(self, data: dict) -> str:
         """
         发送委托
-        
+
         数据字段：
         symbol
         exchange
@@ -45,7 +45,7 @@ class TdApi:
     def cancel_order(self, data: dict) -> None:
         """
         撤销委托
-        
+
         数据字段：
         symbol
         exchange
@@ -57,7 +57,7 @@ class TdApi:
     def send_quote(self, data: dict) -> str:
         """
         发送报价
-        
+
         数据字段：
         symbol
         exchange
@@ -77,7 +77,7 @@ class TdApi:
     def cancel_quote(self, data: dict) -> None:
         """
         撤销报价
-        
+
         数据字段：
         symbol
         exchange
@@ -105,7 +105,7 @@ class TdApi:
     def on_login(self, data: dict) -> None:
         """
         登陆回报
-        
+
         数据字段：
         status
         """
@@ -118,7 +118,7 @@ class TdApi:
     def on_tick(self, data: dict) -> None:
         """
         行情推送
-        
+
         数据字段：
         symbol
         settle_type
@@ -201,7 +201,7 @@ class TdApi:
     def on_quote(self, data: dict) -> None:
         """
         报价状态更新
-        
+
         数据字段：
         symbol
         settle_type
@@ -219,7 +219,7 @@ class TdApi:
     def on_order(self, data: dict) -> None:
         """
         委托状态更新
-        
+
         数据字段：
         symbol
         settle_type
@@ -238,7 +238,7 @@ class TdApi:
     def on_trade(self, data: dict) -> None:
         """
         成交推送
-        
+
         数据字段：
         symbol
         settle_type
@@ -255,7 +255,7 @@ class TdApi:
     def on_log(self, data: dict) -> None:
         """
         日志推送
-          
+
         数据字段：
         msg
         """
@@ -264,7 +264,7 @@ class TdApi:
     def on_all_quotes(self, data: List[dict]):
         """
         查询报价回报
-        
+
         数据字段参考on_quote
         """
         pass
@@ -272,7 +272,7 @@ class TdApi:
     def on_all_contracts(self, data: List[dict]):
         """
         查询合约回报
-        
+
         数据字段参考on_contract
         """
         pass
@@ -280,7 +280,7 @@ class TdApi:
     def on_all_orders(self, data: List[dict]):
         """
         查询委托回报
-        
+
         数据字段参考on_order
         """
         pass
@@ -288,7 +288,7 @@ class TdApi:
     def on_all_trades(self, data: List[dict]):
         """
         查询成交回报
-        
+
         数据字段参考on_trade
         """
         pass
